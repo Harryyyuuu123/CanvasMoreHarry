@@ -142,6 +142,17 @@
             border: 2px solid black;
         }
         
+        .pasted-image {
+            position: absolute;
+            cursor: move;
+            border: 2px dashed transparent;
+            transition: border-color 0.2s;
+        }
+        
+        .pasted-image:hover {
+            border-color: #ff0;
+        }
+        
         #zoom-info {
             position: fixed;
             bottom: 10px;
@@ -227,11 +238,17 @@
             let shapeStartY = 0;
             let currentShape = null;
             let pastePosition = { x: 0, y: 0 };
+            let pastedImages = [];
             
             // Update canvas transform
             function updateCanvasTransform() {
                 canvas.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
                 document.getElementById('zoom-info').textContent = `Zoom: ${Math.round(scale * 100)}%`;
+                
+                // Update all pasted images' positions based on zoom/pan
+                pastedImages.forEach(img => {
+                    img.element.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+                });
             }
             
             // Initialize
@@ -465,13 +482,16 @@
             // Make elements draggable
             function makeDraggable(element) {
                 let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+                let isDraggingElement = false;
                 
                 const header = element.querySelector('.sticky-note-header') || element;
                 
                 header.onmousedown = dragMouseDown;
                 
                 function dragMouseDown(e) {
-                    e = e || window.event;
+                    if (e.button !== 0) return; // Only left mouse button
+                    
+                    e.stopPropagation();
                     e.preventDefault();
                     
                     // Get the mouse cursor position at startup
@@ -480,10 +500,15 @@
                     
                     document.onmouseup = closeDragElement;
                     document.onmousemove = elementDrag;
+                    
+                    isDraggingElement = true;
+                    element.style.cursor = 'grabbing';
+                    element.style.zIndex = '1000';
                 }
                 
                 function elementDrag(e) {
-                    e = e || window.event;
+                    if (!isDraggingElement) return;
+                    
                     e.preventDefault();
                     
                     // Calculate the new cursor position
@@ -501,9 +526,11 @@
                 }
                 
                 function closeDragElement() {
-                    // Stop moving when mouse button is released
                     document.onmouseup = null;
                     document.onmousemove = null;
+                    isDraggingElement = false;
+                    element.style.cursor = 'move';
+                    element.style.zIndex = '';
                 }
             }
             
@@ -633,13 +660,42 @@
                                     reader.onload = function(e) {
                                         const img = new Image();
                                         img.onload = function() {
-                                            ctx.drawImage(
-                                                img, 
-                                                pastePosition.x, 
-                                                pastePosition.y, 
-                                                img.width / 2, 
-                                                img.height / 2
-                                            );
+                                            // Create a container div for the pasted image
+                                            const imgContainer = document.createElement('div');
+                                            imgContainer.className = 'pasted-image';
+                                            imgContainer.style.left = `${pastePosition.x}px`;
+                                            imgContainer.style.top = `${pastePosition.y}px`;
+                                            imgContainer.style.width = `${img.width / 2}px`;
+                                            imgContainer.style.height = `${img.height / 2}px`;
+                                            imgContainer.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+                                            
+                                            // Create the image element
+                                            const imgElement = document.createElement('img');
+                                            imgElement.src = e.target.result;
+                                            imgElement.style.width = '100%';
+                                            imgElement.style.height = '100%';
+                                            imgElement.draggable = false;
+                                            
+                                            imgContainer.appendChild(imgElement);
+                                            document.body.appendChild(imgContainer);
+                                            
+                                            // Make draggable
+                                            makeDraggable(imgContainer);
+                                            
+                                            // Add to pasted images array
+                                            pastedImages.push({
+                                                element: imgContainer,
+                                                x: pastePosition.x,
+                                                y: pastePosition.y,
+                                                width: img.width / 2,
+                                                height: img.height / 2
+                                            });
+                                            
+                                            // Double click to remove
+                                            imgContainer.addEventListener('dblclick', function() {
+                                                document.body.removeChild(imgContainer);
+                                                pastedImages = pastedImages.filter(i => i.element !== imgContainer);
+                                            });
                                         };
                                         img.src = e.target.result;
                                     };
