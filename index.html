@@ -185,18 +185,6 @@
             border-radius: 3px;
             font-size: 14px;
         }
-        
-        #paste-instruction {
-            position: fixed;
-            bottom: 10px;
-            left: 10px;
-            background-color: rgba(0, 0, 0, 0.7);
-            color: white;
-            padding: 5px 10px;
-            border-radius: 3px;
-            font-size: 14px;
-            display: none;
-        }
     </style>
 </head>
 <body>
@@ -232,14 +220,12 @@
     </div>
     
     <div id="zoom-info">Zoom: 100%</div>
-    <div id="paste-instruction">Press Command-V (Mac) or Ctrl-V (Windows) to paste</div>
     
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             const canvas = document.getElementById('main-canvas');
             const ctx = canvas.getContext('2d');
             const container = document.getElementById('canvas-container');
-            const pasteInstruction = document.getElementById('paste-instruction');
             
             // Canvas setup
             canvas.width = window.innerWidth * 3;
@@ -259,7 +245,6 @@
             let shapeStartX = 0;
             let shapeStartY = 0;
             let currentShape = null;
-            let pastePosition = { x: 0, y: 0 };
             let pastedImages = [];
             let isResizing = false;
             let resizeHandle = null;
@@ -335,12 +320,10 @@
                             color: currentColor
                         };
                     } else if (currentTool === 'paste') {
-                        // Set position for paste
-                        pastePosition = { x: canvasX, y: canvasY };
-                        pasteInstruction.style.display = 'block';
-                        setTimeout(() => {
-                            pasteInstruction.style.display = 'none';
-                        }, 2000);
+                        // Automatically paste at center of view
+                        const centerX = (window.innerWidth / 2 - offsetX) / scale;
+                        const centerY = (window.innerHeight / 2 - offsetY) / scale;
+                        handlePaste(centerX, centerY);
                     }
                 }
             });
@@ -401,12 +384,6 @@
             
             // Keyboard shortcuts
             document.addEventListener('keydown', function(e) {
-                // Command-V or Ctrl-V for paste
-                if ((e.metaKey || e.ctrlKey) && e.key === 'v' && currentTool === 'paste') {
-                    handlePaste();
-                    e.preventDefault();
-                }
-                
                 // Delete key to remove selected element
                 if (e.key === 'Delete' && activeElement) {
                     if (activeElement.classList.contains('pasted-image')) {
@@ -428,6 +405,10 @@
             
             document.getElementById('paste-tool').addEventListener('click', function() {
                 setActiveTool('paste');
+                // Automatically paste at center of view when paste tool is selected
+                const centerX = (window.innerWidth / 2 - offsetX) / scale;
+                const centerY = (window.innerHeight / 2 - offsetY) / scale;
+                handlePaste(centerX, centerY);
             });
             
             document.getElementById('rectangle-tool').addEventListener('click', function() {
@@ -715,24 +696,15 @@
             }
             
             // Handle paste
-            function handlePaste() {
-                // First try to paste text
-                navigator.clipboard.readText().then(text => {
-                    if (text) {
-                        createTextElement(pastePosition.x, pastePosition.y);
-                        const textInput = document.querySelector('.text-input:last-child');
-                        textInput.value = text;
-                        textInput.focus();
-                    }
-                }).catch(err => {
-                    console.log('No text in clipboard');
-                });
-                
-                // Then try to paste image
+            function handlePaste(x, y) {
+                // Try to paste image first
                 navigator.clipboard.read().then(clipboardItems => {
+                    let foundImage = false;
+                    
                     for (const clipboardItem of clipboardItems) {
                         for (const type of clipboardItem.types) {
                             if (type.startsWith('image/')) {
+                                foundImage = true;
                                 clipboardItem.getType(type).then(blob => {
                                     const reader = new FileReader();
                                     reader.onload = function(e) {
@@ -741,8 +713,8 @@
                                             // Create a container div for the pasted image
                                             const imgContainer = document.createElement('div');
                                             imgContainer.className = 'pasted-image';
-                                            imgContainer.style.left = `${pastePosition.x}px`;
-                                            imgContainer.style.top = `${pastePosition.y}px`;
+                                            imgContainer.style.left = `${x}px`;
+                                            imgContainer.style.top = `${y}px`;
                                             imgContainer.style.width = `${img.width / 2}px`;
                                             imgContainer.style.height = `${img.height / 2}px`;
                                             imgContainer.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
@@ -768,8 +740,8 @@
                                             // Add to pasted images array
                                             pastedImages.push({
                                                 element: imgContainer,
-                                                x: pastePosition.x,
-                                                y: pastePosition.y,
+                                                x: x,
+                                                y: y,
                                                 width: img.width / 2,
                                                 height: img.height / 2
                                             });
@@ -779,16 +751,48 @@
                                                 document.body.removeChild(imgContainer);
                                                 pastedImages = pastedImages.filter(i => i.element !== imgContainer);
                                             });
+                                            
+                                            // Set as active element
+                                            activeElement = imgContainer;
                                         };
                                         img.src = e.target.result;
                                     };
                                     reader.readAsDataURL(blob);
                                 });
+                                break;
                             }
                         }
+                        if (foundImage) break;
+                    }
+                    
+                    if (!foundImage) {
+                        // If no image found, try to paste text
+                        navigator.clipboard.readText().then(text => {
+                            if (text) {
+                                createTextElement(x, y);
+                                const textInput = document.querySelector('.text-input:last-child');
+                                textInput.value = text;
+                                textInput.focus();
+                                activeElement = textInput;
+                            }
+                        }).catch(err => {
+                            console.log('No content in clipboard');
+                        });
                     }
                 }).catch(err => {
-                    console.log('Failed to read image from clipboard', err);
+                    console.log('Failed to read clipboard', err);
+                    // Fallback to text if image paste fails
+                    navigator.clipboard.readText().then(text => {
+                        if (text) {
+                            createTextElement(x, y);
+                            const textInput = document.querySelector('.text-input:last-child');
+                            textInput.value = text;
+                            textInput.focus();
+                            activeElement = textInput;
+                        }
+                    }).catch(err => {
+                        console.log('No content in clipboard');
+                    });
                 });
             }
             
